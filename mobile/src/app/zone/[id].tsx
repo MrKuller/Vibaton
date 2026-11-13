@@ -1,26 +1,34 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert as RNAlert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import MapView, { Polygon } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ObservationCard } from '@/components/ObservationCard';
+import { useReportSheet } from '@/components/ReportSheet';
 import { Button, Card, Disclaimer, ErrorBox, StatusPill } from '@/components/ui';
+import { IceMap } from '@/components/IceMap';
 import { api, ApiError } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { ago } from '@/lib/format';
 import { getFix } from '@/lib/location';
 import { useSettings } from '@/lib/settings';
-import { levelColors, usePalette } from '@/lib/theme';
-import type { Observation, ReactionKind, ZoneDetail } from '@/lib/types';
+import { usePalette } from '@/lib/theme';
+import type { GridCell, Observation, ReactionKind, ZoneDetail } from '@/lib/types';
 
 export default function ZoneScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const c = usePalette();
   const insets = useSafeAreaInsets();
   const { settings, update } = useSettings();
+  const { user } = useAuth();
   const [zone, setZone] = useState<ZoneDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const miniCells = useMemo<GridCell[]>(
+    () => (zone ? [{ id: zone.id, kind: zone.kind, bay: zone.bay, lat: zone.center.lat, lon: zone.center.lon }] : []),
+    [zone],
+  );
+  const miniStatus = useMemo(() => (zone ? { [zone.id]: { level: zone.status.level } } : {}), [zone]);
 
   const load = useCallback(async () => {
     try {
@@ -30,6 +38,7 @@ export default function ZoneScreen() {
       setError(e instanceof ApiError ? e.message : 'Нет связи с сервером');
     }
   }, [id]);
+  const { open: report, sheet: reportSheet } = useReportSheet(() => load());
 
   useFocusEffect(
     useCallback(() => {
@@ -42,6 +51,7 @@ export default function ZoneScreen() {
     update({ favorites: fav ? settings.favorites.filter((f) => f !== id) : [...settings.favorites, id] });
 
   async function react(o: Observation, kind: ReactionKind) {
+    if (!user) return router.push('/login');
     const next = o.my_reaction === kind ? null : kind;
     try {
       const at = next === 'confirm' ? await getFix() : null;
@@ -78,14 +88,12 @@ export default function ZoneScreen() {
   }
 
   const st = zone.status;
-  const lc = levelColors(c, st.level);
   const box = {
     danger: { bg: c.dangerBg, fg: c.dangerInk },
     risk: { bg: c.riskBg, fg: c.riskInk },
     clear: { bg: c.accentBg, fg: c.accentInk },
     nodata: { bg: c.surface2, fg: c.ink },
   }[st.level];
-  const coords = zone.geometry.coordinates[0].map(([lon, lat]) => ({ latitude: lat, longitude: lon }));
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -103,7 +111,9 @@ export default function ZoneScreen() {
         contentContainerStyle={{ padding: 16, gap: 12 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
       >
-        <Text style={{ color: c.muted, fontSize: 13 }}>{zone.bay}</Text>
+        <Text style={{ color: c.muted, fontSize: 13 }}>
+          {zone.bay} · участок сетки около 1,5 км²{zone.place ? ` рядом с местом «${zone.place.name}»` : ''}
+        </Text>
         <View style={[s.status, { backgroundColor: box.bg }]}>
           <View style={s.row}>
             <StatusPill level={st.level} />
@@ -117,18 +127,13 @@ export default function ZoneScreen() {
           )}
         </View>
 
-        <MapView
+        <IceMap
           style={s.mini}
-          initialRegion={{ latitude: zone.center.lat, longitude: zone.center.lon, latitudeDelta: 0.06, longitudeDelta: 0.06 }}
-          showsUserLocation
-          scrollEnabled={false}
-          zoomEnabled={false}
-          pitchEnabled={false}
-          rotateEnabled={false}
-          accessibilityLabel={`Участок ${zone.name} на карте`}
-        >
-          <Polygon coordinates={coords} fillColor={lc.fill} strokeColor={lc.stroke} strokeWidth={2} lineDashPattern={lc.dashed ? [6, 4] : undefined} />
-        </MapView>
+          cells={miniCells}
+          statuses={miniStatus}
+          initial={{ lat: zone.center.lat, lon: zone.center.lon, zoom: 13 }}
+          interactive={false}
+        />
 
         <Card>
           <Text style={{ fontWeight: '800', color: c.ink, fontSize: 14 }}>Почему такой статус</Text>
@@ -156,13 +161,14 @@ export default function ZoneScreen() {
           </Card>
         )}
         {zone.observations.map((o) => (
-          <ObservationCard key={o.id} o={o} onReact={react} onDelete={remove} />
+          <ObservationCard key={o.id} o={o} onReact={react} onDelete={remove} onReport={report} />
         ))}
       </ScrollView>
       <View style={[s.foot, { backgroundColor: c.surface, borderColor: c.line, paddingBottom: insets.bottom + 12 }]}>
         <Button title="Я здесь — добавить наблюдение" onPress={() => router.push(`/add?zone=${zone.id}`)} />
         <Disclaimer />
       </View>
+      {reportSheet}
     </View>
   );
 }
@@ -171,6 +177,6 @@ const s = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   status: { borderRadius: 14, padding: 14, gap: 6 },
-  mini: { height: 160, borderRadius: 16, overflow: 'hidden' },
+  mini: { height: 180, borderRadius: 16, overflow: 'hidden' },
   foot: { borderTopWidth: 1, paddingHorizontal: 16, paddingTop: 12, gap: 8 },
 });

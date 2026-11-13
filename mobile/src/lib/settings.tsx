@@ -1,8 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+export type ThemeChoice = 'system' | 'light' | 'dark';
+
 export interface Settings {
   consent: boolean;
+  theme: ThemeChoice;
   name: string;
   anonymous: boolean;
   hidePoint: boolean;
@@ -12,6 +15,7 @@ export interface Settings {
 
 const DEFAULTS: Settings = {
   consent: false,
+  theme: 'system',
   name: '',
   anonymous: true,
   hidePoint: true,

@@ -94,8 +94,8 @@ export default function WeatherScreen() {
         </Card>
       )}
       {alerts.map((a, i) => (
-        <Card key={i} style={{ borderColor: a.kind === 'ban' ? c.danger : c.risk, borderWidth: 2 }}>
-          {a.kind === 'ban' ? (
+        <Card key={i} style={{ borderColor: a.critical ? c.danger : c.risk, borderWidth: 2 }}>
+          {a.kind === 'ban' || a.kind === 'cluster' ? (
             <>
               <Text style={{ fontWeight: '800', color: c.ink }}>{a.zone_name}</Text>
               <Text style={{ color: c.ink }}>{a.text}</Text>

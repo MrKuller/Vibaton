@@ -3,7 +3,8 @@
 Scale has no "safe" level: danger > risk > clear ("тревог нет") > nodata.
 - one fresh danger report beats any number of calm ones;
 - reports are fresh for 6 h (3 h during thaw or strong wind) and stop counting after 24 h;
-- weather and AI can only raise a level;
+- weather and AI can only raise a level; offshore wind raises cells that have reports, but a cell
+  without reports stays grey ("нет данных"): unknown must look unknown, the wind goes into the reasons;
 - an official ban always means danger.
 """
 from __future__ import annotations
@@ -46,12 +47,22 @@ def is_wrong(o) -> bool:
     return c["wrong"] >= 2 and c["wrong"] > c["confirm"]
 
 
+def counts_for_status(o) -> bool:
+    """Moderation never hides a danger: a post on review still counts if it reports danger or risk.
+    Hidden posts and calm posts on review do not count."""
+    st = getattr(o, "moderation_status", "ok")
+    if st == "hidden":
+        return False
+    return st != "pending" or severity(o) != "clear"
+
+
 def severity(o) -> str:
     sev = TYPES[o.type][1]
-    # text hints only raise: a "clear" post that mentions a crack counts as risk
-    if sev == "clear" and o.ai_hazard in ("risk", "danger"):
+    # AI hints from the text or the photo only raise: a "clear" post that mentions a crack counts as risk
+    hints = {getattr(o, "ai_hazard", "none"), getattr(o, "photo_hazard", "none")}
+    if sev == "clear" and hints & {"risk", "danger"}:
         return "risk"
-    if sev == "risk" and o.ai_hazard == "danger":
+    if sev == "risk" and "danger" in hints:
         return "danger"
     return sev
 
@@ -72,7 +83,8 @@ def compute(zone, observations: list, weather, now: datetime | None = None) -> Z
     thaw_or_wind = bool(weather and (weather.crosses_zero or weather.wind_ms >= STRONG_WIND_MS))
     fresh_win = FRESH_SHORT if thaw_or_wind else FRESH
 
-    valid = sorted((o for o in observations if not is_wrong(o)), key=lambda o: as_utc(o.observed_at), reverse=True)
+    valid = sorted((o for o in observations if not is_wrong(o) and counts_for_status(o)),
+                   key=lambda o: as_utc(o.observed_at), reverse=True)
     fresh = [o for o in valid if now - as_utc(o.observed_at) < fresh_win]
     stale = [o for o in valid if fresh_win <= now - as_utc(o.observed_at) < STALE]
 
@@ -90,7 +102,8 @@ def compute(zone, observations: list, weather, now: datetime | None = None) -> Z
     offshore = bool(weather and weather.wind_ms >= OFFSHORE_MIN_MS
                     and angle_in_ranges(weather.wind_from_deg, zone.offshore_from or []))
     if offshore:
-        level = raise_to(level, "risk")
+        if level != "nodata":
+            level = raise_to(level, "risk")
         reasons.append(f"Отжимной ветер {weather.wind_ms:.0f} м/с")
     if weather and weather.crosses_zero:
         reasons.append("Оттепель: температура выше 0 °C")

@@ -59,7 +59,8 @@ def fallback() -> Weather:
 
 
 def offline() -> bool:
-    return os.getenv("KL_OFFLINE") == "1"
+    from .config import flag
+    return flag("KL_OFFLINE")
 
 
 def get_weather(lat: float, lon: float) -> Weather:

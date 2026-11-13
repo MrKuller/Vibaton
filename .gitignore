@@ -19,3 +19,11 @@ mobile/android/
 # Secrets
 .env
 *.env.local
+
+# models and secrets
+backend/models/*.pt
+backend/models/*.onnx
+backend/data/secret.key
+
+# Python 3.12 virtual environment
+backend/.venv312/

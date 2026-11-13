@@ -1,5 +1,6 @@
 import { useColorScheme } from 'react-native';
 
+import { useSettings } from './settings';
 import type { Level } from './types';
 
 const light = {
@@ -63,21 +64,28 @@ const dark: typeof light = {
 
 export type Palette = typeof light;
 
+/** Theme chosen in Профиль → Тема: system / light / dark. */
+export function useIsDark(): boolean {
+  const system = useColorScheme();
+  const { settings } = useSettings();
+  return settings.theme === 'system' ? system === 'dark' : settings.theme === 'dark';
+}
+
 export function usePalette(): Palette {
-  return useColorScheme() === 'dark' ? dark : light;
+  return useIsDark() ? dark : light;
 }
 
 /** Map fills: no green anywhere. "No data" is grey with a dashed outline. */
 export function levelColors(c: Palette, level: Level) {
   switch (level) {
     case 'danger':
-      return { fill: 'rgba(179,38,30,0.55)', stroke: '#7A120D', pill: c.danger, pillText: '#FFFFFF', dashed: false };
+      return { fill: 'rgba(179,38,30,0.55)', hex: '#B3261E', opacity: 0.55, stroke: '#7A120D', pill: c.danger, pillText: '#FFFFFF', dashed: false };
     case 'risk':
-      return { fill: 'rgba(245,180,81,0.6)', stroke: '#B86A00', pill: c.risk, pillText: c.riskOn, dashed: false };
+      return { fill: 'rgba(245,180,81,0.6)', hex: '#F5B451', opacity: 0.6, stroke: '#B86A00', pill: c.risk, pillText: c.riskOn, dashed: false };
     case 'clear':
-      return { fill: 'rgba(156,195,238,0.55)', stroke: '#2F6FB5', pill: c.clear, pillText: '#0B1B2B', dashed: false };
+      return { fill: 'rgba(156,195,238,0.55)', hex: '#9CC3EE', opacity: 0.55, stroke: '#2F6FB5', pill: c.clear, pillText: '#0B1B2B', dashed: false };
     default:
-      return { fill: 'rgba(138,151,165,0.35)', stroke: '#5D6B79', pill: c.surface2, pillText: c.ink, dashed: true };
+      return { fill: 'rgba(138,151,165,0.35)', hex: '#8A97A5', opacity: 0.35, stroke: '#5D6B79', pill: c.surface2, pillText: c.ink, dashed: true };
   }
 }
 

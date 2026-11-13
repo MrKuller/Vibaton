@@ -1,0 +1,7 @@
+# Нейросетевые модели (необязательно). Без них работают каскады Хаара и классическое компьютерное зрение.
+# Ставится отдельно, потому что PyTorch весит 1–3 ГБ:
+#   .venv\Scripts\python -m pip install -r requirements-ai.txt
+# Только процессор (меньше места), Windows/Linux:
+#   .venv\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   .venv\Scripts\python -m pip install ultralytics
+ultralytics>=8.3

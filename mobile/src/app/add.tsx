@@ -1,17 +1,19 @@
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert as RNAlert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Disclaimer } from '@/components/ui';
 import { api, ApiError, isNetworkError } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { km } from '@/lib/format';
-import { distanceKm, useFix } from '@/lib/location';
+import { useFix } from '@/lib/location';
+import { nearestCell, placesByDistance, useMapData } from '@/lib/mapData';
 import { enqueue } from '@/lib/queue';
 import { useSettings } from '@/lib/settings';
 import { usePalette } from '@/lib/theme';
-import type { NewObservation, ObsType, ZoneFeature } from '@/lib/types';
+import type { NewObservation, ObsType } from '@/lib/types';
 
 const TYPES: { id: ObsType; label: string; sev: 'danger' | 'risk' | 'clear' }[] = [
   { id: 'crack', label: 'Трещина', sev: 'risk' },
@@ -29,9 +31,11 @@ export default function AddScreen() {
   const c = usePalette();
   const insets = useSafeAreaInsets();
   const { settings } = useSettings();
+  const { user, ready: authReady } = useAuth();
   const { fix, state: fixState, refresh } = useFix();
 
-  const [zones, setZones] = useState<ZoneFeature[]>([]);
+  const { cells, places } = useMapData();
+  // undefined = use GPS; a cell id (from the map) or a place id
   const [pickedZone, setZoneId] = useState<string | undefined>(params.zone);
   const [type, setType] = useState<ObsType | null>(null);
   const [thick, setThick] = useState('');
@@ -43,19 +47,15 @@ export default function AddScreen() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  useEffect(() => {
-    api.zones().then((z) => setZones(z.features)).catch(() => undefined);
-  }, []);
-
-  const sorted = useMemo(
-    () =>
-      zones
-        .map((z) => ({ z, d: fix ? distanceKm(fix, z.properties.center) : null }))
-        .sort((a, b) => (a.d ?? 0) - (b.d ?? 0)),
-    [zones, fix],
-  );
-  // preselect the nearest zone when the user stands within 3 km of it
-  const zoneId = pickedZone ?? (sorted[0]?.d != null && sorted[0].d < 3 ? sorted[0].z.id : undefined);
+  const sorted = useMemo(() => placesByDistance(places, fix).slice(0, 8), [places, fix]);
+  // on the water (within 1.5 km of a cell) the server finds the cell by GPS
+  const onWater = useMemo(() => {
+    if (!fix || !cells.length) return false;
+    const n = nearestCell(cells, fix);
+    return !!n && n.km <= 1.5;
+  }, [fix, cells]);
+  const zoneId = pickedZone;
+  const pickedFromMap = !!zoneId && !places.some((p) => p.id === zoneId);
 
   function step(d: number) {
     const v = thick === '' ? 18 : Number(thick) || 0;
@@ -71,7 +71,7 @@ export default function AddScreen() {
 
   function validate(): string | null {
     if (!type) return 'Выберите, что вы видите.';
-    if (!zoneId && !fix) return 'Выберите участок: геолокация недоступна.';
+    if (!zoneId && !onWater) return fix ? 'Вы далеко от льда заливов. Выберите место из списка.' : 'Выберите место: геолокация недоступна.';
     if (thick !== '') {
       if (!/^\d{1,3}$/.test(thick)) return 'Толщина — целое число сантиметров.';
       const n = Number(thick);
@@ -98,13 +98,25 @@ export default function AddScreen() {
       gps_accuracy_m: fix?.accuracy ?? null,
       mocked_location: fix?.mocked ?? false,
       anonymous: anon,
-      author_name: settings.name || null,
       hide_point: settings.hidePoint,
       observed_at: new Date().toISOString(),
     };
     try {
       const o = await api.create(body);
-      if (photo) await api.uploadPhoto(o.id, photo).catch(() => undefined);
+      if (photo) {
+        try {
+          await api.uploadPhoto(o.id, photo);
+        } catch (e) {
+          // the observation is already published; tell why the photo was not accepted
+          RNAlert.alert(
+            'Фото не принято',
+            (e instanceof ApiError ? e.message : 'Нет связи при отправке фото.') + ' Наблюдение опубликовано без фото.',
+          );
+        }
+      }
+      if (o.moderation_status === 'pending') {
+        RNAlert.alert('Отправлено на проверку', o.moderation_note ?? 'Модератор посмотрит текст в ближайшее время.');
+      }
       router.replace(`/zone/${o.zone_id}`);
     } catch (e) {
       if (isNetworkError(e)) {
@@ -128,6 +140,18 @@ export default function AddScreen() {
           ? { borderColor: c.riskEdge, backgroundColor: c.riskBg, borderWidth: 2 }
           : { borderColor: c.accent, backgroundColor: c.accentBg, borderWidth: 2 };
 
+  if (authReady && !user) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.bg, padding: 24, justifyContent: 'center', gap: 14 }}>
+        <Text style={{ color: c.ink, fontSize: 20, fontWeight: '800' }}>Войдите, чтобы публиковать</Text>
+        <Text style={{ color: c.muted, fontSize: 14, lineHeight: 20 }}>
+          Наблюдения публикуются только из аккаунта: так меньше фейков. В ленте можно остаться анонимным.
+        </Text>
+        <Button title="Войти или зарегистрироваться" onPress={() => router.push('/login')} />
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }} keyboardShouldPersistTaps="handled">
@@ -142,17 +166,28 @@ export default function AddScreen() {
         </Pressable>
 
         <View style={{ gap: 8 }}>
-          <Text style={[s.label, { color: c.ink }]}>Участок</Text>
+          <Text style={[s.label, { color: c.ink }]}>Где</Text>
           <View style={s.wrap}>
-            {sorted.map(({ z, d }) => (
+            {(onWater || pickedFromMap) && (
               <Pressable
-                key={z.id}
-                onPress={() => setZoneId(z.id)}
-                style={[s.pillBtn, zoneId === z.id ? { borderColor: c.accent, backgroundColor: c.accentBg, borderWidth: 2 } : { borderColor: c.line2, backgroundColor: c.surface }]}
-                accessibilityState={{ selected: zoneId === z.id }}
+                onPress={() => setZoneId(pickedFromMap ? zoneId : undefined)}
+                style={[s.pillBtn, (!zoneId || pickedFromMap) ? { borderColor: c.accent, backgroundColor: c.accentBg, borderWidth: 2 } : { borderColor: c.line2, backgroundColor: c.surface }]}
+                accessibilityState={{ selected: !zoneId || pickedFromMap }}
               >
-                <Text style={{ color: zoneId === z.id ? c.accentInk : c.ink, fontWeight: '700', fontSize: 13 }}>
-                  {z.properties.name}
+                <Text style={{ color: (!zoneId || pickedFromMap) ? c.accentInk : c.ink, fontWeight: '700', fontSize: 13 }}>
+                  {pickedFromMap ? 'Участок, выбранный на карте' : 'Здесь, по GPS'}
+                </Text>
+              </Pressable>
+            )}
+            {sorted.map(({ p, d }) => (
+              <Pressable
+                key={p.id}
+                onPress={() => setZoneId(p.id)}
+                style={[s.pillBtn, zoneId === p.id ? { borderColor: c.accent, backgroundColor: c.accentBg, borderWidth: 2 } : { borderColor: c.line2, backgroundColor: c.surface }]}
+                accessibilityState={{ selected: zoneId === p.id }}
+              >
+                <Text style={{ color: zoneId === p.id ? c.accentInk : c.ink, fontWeight: '700', fontSize: 13 }}>
+                  {p.name}
                   {d != null ? ` · ${km(d)}` : ''}
                 </Text>
               </Pressable>
@@ -241,7 +276,9 @@ export default function AddScreen() {
             <Text style={{ color: c.ink, fontWeight: '700' }}>Снять фото</Text>
           )}
         </Pressable>
-        <Text style={{ color: c.muted, fontSize: 12, marginTop: -10 }}>Фото только с камеры: так видно, что снимок свежий.</Text>
+        <Text style={{ color: c.muted, fontSize: 12, marginTop: -10, lineHeight: 17 }}>
+          Фото только с камеры. На сервере лица и номера машин размываются, а данные о телефоне и GPS из файла удаляются.
+        </Text>
         {!!err && <Text style={{ color: c.danger, fontWeight: '700' }} accessibilityLiveRegion="polite">{err}</Text>}
       </ScrollView>
 

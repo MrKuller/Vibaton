@@ -37,8 +37,10 @@ def test_freshness_windows():
 
 def test_strong_wind_shortens_freshness_and_offshore_raises():
     windy = Weather(temp_c=-10, wind_ms=12, wind_gust_ms=17, wind_from_deg=10, days=CALM.days)
-    s = st.compute(zone(), [obs("clear", 4 * 60)], windy, NOW)
+    s = st.compute(zone(), [obs("clear", 2 * 60)], windy, NOW)
     assert s.fresh_window_h == 3 and s.offshore_wind and s.level == "risk"
+    # 4 h old is no longer fresh in strong wind: the cell goes grey
+    assert st.compute(zone(), [obs("clear", 4 * 60)], windy, NOW).level == "nodata"
 
 
 def test_wrong_reports_are_ignored():
@@ -65,3 +67,9 @@ def test_geo():
     g = {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]]}
     assert geo.point_in_polygon(0.5, 0.5, g) and not geo.point_in_polygon(2, 2, g)
     assert geo.angle_in_ranges(350, [[330, 40]]) and not geo.angle_in_ranges(180, [[330, 40]])
+
+
+def test_wind_does_not_paint_unknown_cells():
+    windy = Weather(temp_c=-10, wind_ms=12, wind_gust_ms=17, wind_from_deg=10, days=CALM.days)
+    s = st.compute(zone(), [], windy, NOW)
+    assert s.level == "nodata" and s.offshore_wind and any("Отжимной" in r for r in s.reasons)

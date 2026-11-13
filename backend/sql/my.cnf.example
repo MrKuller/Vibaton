@@ -1,0 +1,20 @@
+# Добавьте в конфигурацию MySQL/MariaDB (Linux: /etc/mysql/conf.d/krepkiy.cnf; Laragon: my.ini в разделе [mysqld])
+# и перезапустите MySQL. Значения рассчитаны на небольшой сервер с 2–4 ГБ памяти.
+[mysqld]
+# слушать только локальный адрес: базу не видно из интернета
+bind-address            = 127.0.0.1
+# общий предел соединений и предел на одного пользователя
+max_connections         = 100
+max_user_connections    = 40
+# закрывать брошенные соединения через 5 минут
+wait_timeout            = 300
+interactive_timeout     = 300
+# после 20 ошибок подключения с одного IP MySQL перестаёт его принимать (сброс: FLUSH HOSTS)
+max_connect_errors      = 20
+# защита от гигантских запросов
+max_allowed_packet      = 16M
+# MySQL 8: ни один SELECT не дольше 5 секунд (в MariaDB аналог: max_statement_time = 5)
+max_execution_time      = 5000
+# журнал медленных запросов: видно, что тормозит под нагрузкой
+slow_query_log          = 1
+long_query_time         = 1

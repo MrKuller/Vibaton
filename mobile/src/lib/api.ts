@@ -1,30 +1,27 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import type {
   Alert,
+  AuthResult,
+  Cluster,
+  CompactGrid,
+  Place,
+  StatusMap,
   NewObservation,
   Observation,
+  QueueItem,
   ReactionKind,
+  ReportReason,
   Weather,
-  ZoneCollection,
   ZoneDetail,
+  User,
 } from './types';
 
 // On a phone, localhost is the phone itself: set EXPO_PUBLIC_API_URL=http://<your-computer-ip>:8000
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
-const DEVICE_KEY = 'kl.deviceId';
-let deviceId: string | null = null;
-
-export async function getDeviceId(): Promise<string> {
-  if (deviceId) return deviceId;
-  let id = await AsyncStorage.getItem(DEVICE_KEY);
-  if (!id) {
-    id = 'dev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
-    await AsyncStorage.setItem(DEVICE_KEY, id);
-  }
-  deviceId = id;
-  return id;
+// Set by AuthProvider (src/lib/auth.tsx); the token itself lives in SecureStore.
+let authToken: string | null = null;
+export function setAuthToken(token: string | null) {
+  authToken = token;
 }
 
 export class ApiError extends Error {
@@ -43,7 +40,7 @@ export function isNetworkError(e: unknown): boolean {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set('X-Device-Id', await getDeviceId());
+  if (authToken) headers.set('Authorization', `Bearer ${authToken}`);
   if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
@@ -68,7 +65,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const photoUrl = (p: string | null) => (p ? API_URL + p : null);
 
 export const api = {
-  zones: () => request<ZoneCollection>('/zones'),
+  register: (b: {
+    email: string;
+    password: string;
+    display_name: string;
+    website: string;
+  }) => request<AuthResult>('/auth/register', { method: 'POST', body: JSON.stringify(b) }),
+  login: (email: string, password: string) =>
+    request<AuthResult>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  logout: () => request<void>('/auth/logout', { method: 'POST' }),
+  me: () => request<User>('/auth/me'),
+  clusters: () => request<Cluster[]>('/clusters'),
+  grid: () => request<CompactGrid>('/grid'),
+  places: () => request<Place[]>('/places'),
+  status: () => request<StatusMap>('/status'),
   zone: (id: string) => request<ZoneDetail>(`/zones/${encodeURIComponent(id)}`),
   observations: (q: Record<string, string | number | boolean | undefined> = {}) => {
     const qs = Object.entries(q)
@@ -90,6 +100,17 @@ export const api = {
     form.append('file', { uri, name: 'photo.jpg', type: 'image/jpeg' } as unknown as Blob);
     return request<Observation>(`/observations/${id}/photo`, { method: 'POST', body: form });
   },
+  report: (id: number, reason: ReportReason, comment = '') =>
+    request<{ ok: boolean; message: string }>(`/observations/${id}/reports`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, comment }),
+    }),
+  moderationQueue: () => request<QueueItem[]>('/moderation/queue'),
+  moderate: (id: number, action: 'approve' | 'hide' | 'delete', note = '', ban_days?: number) =>
+    request<{ ok: boolean }>(`/moderation/observations/${id}`, {
+      method: 'POST',
+      body: JSON.stringify({ action, note, ban_days }),
+    }),
   weather: (lat: number, lon: number) => request<Weather>(`/weather?lat=${lat}&lon=${lon}`),
   alerts: () => request<Alert[]>('/alerts'),
 };

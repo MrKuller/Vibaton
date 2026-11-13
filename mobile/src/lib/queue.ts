@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { api, isNetworkError } from './api';
+import { api, ApiError, isNetworkError } from './api';
 import type { NewObservation } from './types';
 
 /** Observations made without network. observed_at keeps the real time of the observation. */
@@ -44,7 +44,8 @@ export async function flushQueue(): Promise<number> {
         if (item.photoUri) await api.uploadPhoto(o.id, item.photoUri).catch(() => undefined);
         sent++;
       } catch (e) {
-        if (isNetworkError(e)) left.push(item);
+        // keep it for later when offline or logged out; drop what the server rejects (e.g. older than 24 h)
+        if (isNetworkError(e) || (e instanceof ApiError && (e.status === 401 || e.status === 429))) left.push(item);
       }
     }
     await AsyncStorage.setItem(KEY, JSON.stringify(left));

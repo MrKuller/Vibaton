@@ -1,7 +1,6 @@
 import type { ExpoConfig } from 'expo/config';
 
-// Google Maps keys are needed only for your own Android/iOS builds (Expo Go ships its own).
-// Put them in .env as GOOGLE_MAPS_ANDROID_KEY / GOOGLE_MAPS_IOS_KEY, never commit them.
+// Map: Leaflet + OpenStreetMap in a WebView (src/components/IceMap.tsx). No API keys; works in Expo Go.
 const config: ExpoConfig = {
   name: 'Крепкий лёд',
   slug: 'krepkiy-led',
@@ -41,13 +40,7 @@ const config: ExpoConfig = {
         photosPermission: false,
       },
     ],
-    [
-      'react-native-maps',
-      {
-        androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_ANDROID_KEY,
-        iosGoogleMapsApiKey: process.env.GOOGLE_MAPS_IOS_KEY,
-      },
-    ],
+    'expo-secure-store',
   ],
 };
 

@@ -11,14 +11,11 @@ Safety rules from the spec review:
 from __future__ import annotations
 
 import json
-import os
 import re
 
 import httpx
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
-OLLAMA_TIMEOUT_S = float(os.getenv("OLLAMA_TIMEOUT_S", "8"))
+from .config import OLLAMA_MODEL, OLLAMA_TIMEOUT_S, OLLAMA_URL, flag
 
 HAZARDS = ("danger", "risk", "none")
 FORBIDDEN = re.compile(r"безопасн|выдерж|можно\s+(идти|выходить|ходить)|надёжн|надежн", re.I)
@@ -35,7 +32,7 @@ _TAGS = {
 
 
 def _ollama_disabled() -> bool:
-    return os.getenv("KL_OFFLINE") == "1" or os.getenv("KL_DISABLE_LLM") == "1"
+    return flag("KL_OFFLINE") or flag("KL_DISABLE_LLM")
 
 
 def classify_rules(text: str) -> dict:

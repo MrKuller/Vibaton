@@ -3,28 +3,33 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { ObservationCard } from '@/components/ObservationCard';
-import { Card, Disclaimer } from '@/components/ui';
+import { Button, Card, Chip, Disclaimer } from '@/components/ui';
 import { api, API_URL } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { ago, hhmm, leftText } from '@/lib/format';
 import { queuedCount } from '@/lib/queue';
-import { onIceLeftMs, useSettings } from '@/lib/settings';
+import { onIceLeftMs, useSettings, type ThemeChoice } from '@/lib/settings';
 import { levelColors, usePalette } from '@/lib/theme';
-import type { Observation, ZoneFeature } from '@/lib/types';
+import type { Observation, ZoneDetail } from '@/lib/types';
 
 export default function ProfileScreen() {
   const c = usePalette();
   const { settings, update } = useSettings();
+  const { user, logout } = useAuth();
   const [mine, setMine] = useState<Observation[]>([]);
-  const [zones, setZones] = useState<ZoneFeature[]>([]);
+  const [favs, setFavs] = useState<ZoneDetail[]>([]);
   const [queued, setQueued] = useState(0);
   const [now, setNow] = useState(() => Date.now());
 
   useFocusEffect(
     useCallback(() => {
-      api.observations({ mine: true, hours: 24 * 30 }).then(setMine).catch(() => undefined);
-      api.zones().then((z) => setZones(z.features)).catch(() => undefined);
+      if (user) api.observations({ mine: true, hours: 24 * 30 }).then(setMine).catch(() => undefined);
+      else setMine([]);
+      Promise.all(settings.favorites.slice(0, 10).map((id) => api.zone(id).catch(() => null)))
+        .then((xs) => setFavs(xs.filter((x): x is ZoneDetail => !!x)))
+        .catch(() => undefined);
       queuedCount().then(setQueued);
-    }, []),
+    }, [user, settings.favorites]),
   );
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -46,19 +51,40 @@ export default function ProfileScreen() {
 
   const confirmed = mine.filter((o) => o.counts.confirm > 0).length;
   const wrong = mine.filter((o) => o.counts.wrong > o.counts.confirm).length;
-  const favs = zones.filter((z) => settings.favorites.includes(z.id));
 
   return (
     <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={{ padding: 16, gap: 14 }} keyboardShouldPersistTaps="handled">
+      {!user ? (
+        <Card style={{ gap: 10 }}>
+          <Text style={{ color: c.ink, fontSize: 16, fontWeight: '800' }}>Вы не вошли</Text>
+          <Text style={{ color: c.muted, fontSize: 13, lineHeight: 19 }}>
+            Карта и лента доступны без аккаунта. Чтобы публиковать наблюдения и подтверждать чужие, войдите.
+          </Text>
+          <Button title="Войти или зарегистрироваться" onPress={() => router.push('/login')} />
+        </Card>
+      ) : (
       <Card style={{ gap: 12 }}>
-        <Text style={[s.small, { color: c.muted }]}>Имя в ленте (если не анонимно)</Text>
-        <TextInput
-          value={settings.name}
-          onChangeText={(name) => update({ name: name.slice(0, 40) })}
-          placeholder="Как вас подписывать"
-          placeholderTextColor={c.muted}
-          style={[s.input, { color: c.ink, borderColor: c.line2 }]}
-        />
+        <View style={s.row}>
+          <View style={[s.avatar, { backgroundColor: c.ink }]}>
+            <Text style={{ color: c.bg, fontWeight: '800', fontSize: 18 }}>{user.display_name.slice(0, 2).toUpperCase()}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: c.ink, fontSize: 18, fontWeight: '800' }}>{user.display_name}</Text>
+            <Text style={{ color: c.muted, fontSize: 13 }}>{user.email}</Text>
+          </View>
+          <Pressable onPress={logout} style={[s.nbtn, { borderColor: c.line2 }]} accessibilityRole="button">
+            <Text style={{ color: c.ink, fontWeight: '700', fontSize: 13 }}>Выйти</Text>
+          </Pressable>
+        </View>
+        {user.banned_until && (
+          <Text style={{ color: c.dangerInk, backgroundColor: c.dangerBg, padding: 10, borderRadius: 10, fontWeight: '700', overflow: 'hidden' }}>
+            Публикации заблокированы до {new Date(user.banned_until).toLocaleString('ru-RU')} за нарушение правил. Смотреть
+            карту можно.
+          </Text>
+        )}
+        {(user.role === 'moderator' || user.role === 'admin') && (
+          <Button title="Модерация: очередь жалоб" variant="ghost" onPress={() => router.push('/moderation')} />
+        )}
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {[
             [mine.length, 'наблюдений за 30 дней'],
@@ -75,6 +101,7 @@ export default function ProfileScreen() {
           <Text style={{ color: c.riskInk, fontWeight: '700', fontSize: 13 }}>Ждут отправки без сети: {queued}</Text>
         )}
       </Card>
+      )}
 
       <View style={[s.onice, { backgroundColor: c.night }]}>
         <View style={s.row}>
@@ -124,11 +151,11 @@ export default function ProfileScreen() {
               onPress={() => router.push(`/zone/${z.id}`)}
               style={[s.favRow, i > 0 && { borderTopWidth: 1, borderColor: c.line }]}
             >
-              <View style={[s.stripe, { backgroundColor: levelColors(c, z.properties.status.level).stroke }]} />
+              <View style={[s.stripe, { backgroundColor: levelColors(c, z.status.level).stroke }]} />
               <View style={{ flex: 1 }}>
-                <Text style={{ color: c.ink, fontWeight: '800' }}>{z.properties.name}</Text>
+                <Text style={{ color: c.ink, fontWeight: '800' }}>{z.name}</Text>
                 <Text style={{ color: c.muted, fontSize: 12 }}>
-                  {z.properties.status.label} · {ago(z.properties.status.last_observed_at)}
+                  {z.status.label} · {ago(z.status.last_observed_at)}
                 </Text>
               </View>
               <Text style={{ color: c.muted, fontSize: 18 }}>›</Text>
@@ -137,8 +164,8 @@ export default function ProfileScreen() {
         </Card>
       )}
 
-      <Text style={[s.h2, { color: c.ink }]}>Мои наблюдения</Text>
-      {mine.length === 0 ? (
+      {user && <Text style={[s.h2, { color: c.ink }]}>Мои наблюдения</Text>}
+      {!user ? null : mine.length === 0 ? (
         <Card>
           <Text style={{ color: c.muted, fontSize: 13 }}>Вы ещё ничего не публиковали. Кнопка «+» на карте добавляет наблюдение.</Text>
         </Card>
@@ -148,6 +175,18 @@ export default function ProfileScreen() {
 
       <Text style={[s.h2, { color: c.ink }]}>Настройки</Text>
       <Card style={{ gap: 4 }}>
+        <Text style={[s.setting, { color: c.ink, paddingBottom: 0 }]}>Тема</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingBottom: 8 }}>
+          {(
+            [
+              ['system', 'Как в системе'],
+              ['light', 'Светлая'],
+              ['dark', 'Тёмная'],
+            ] as [ThemeChoice, string][]
+          ).map(([k, label]) => (
+            <Chip key={k} label={label} selected={settings.theme === k} onPress={() => update({ theme: k })} />
+          ))}
+        </View>
         <View style={s.row}>
           <Text style={[s.setting, { color: c.ink }]}>Публиковать анонимно</Text>
           <Switch value={settings.anonymous} onValueChange={(anonymous) => update({ anonymous })} />
@@ -165,6 +204,7 @@ export default function ProfileScreen() {
 
 const s = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  avatar: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   small: { fontSize: 12, fontWeight: '700' },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 46, fontSize: 15 },
   stat: { flex: 1, borderRadius: 14, padding: 10, gap: 2 },

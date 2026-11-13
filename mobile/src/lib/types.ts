@@ -44,6 +44,88 @@ export interface ZoneCollection {
   features: ZoneFeature[];
 }
 
+/** One water cell: an H3 hexagon. Open water ~0.74 km², near the shore ~0.1 km², rivers ~0.015 km². */
+export interface GridCell {
+  id: string; // H3 index: the map draws the hexagon from it
+  kind: 'open' | 'coast' | 'river';
+  bay: string;
+  lat: number;
+  lon: number;
+}
+
+/** /grid: [id, kind index, bay index, lat, lon] — ids instead of geometry keep it ~0.3 MB */
+export interface CompactGrid {
+  v: number;
+  kinds: GridCell['kind'][];
+  bays: string[];
+  cells: [string, number, number, number, number][];
+}
+
+export interface Place {
+  id: string;
+  name: string;
+  bay: string;
+  lat: number;
+  lon: number;
+  cell_id: string;
+  ban: boolean;
+  ban_text: string | null;
+}
+
+/** Only cells that are not grey; every other cell is "nodata". */
+export interface CellStatus {
+  level: Level;
+  label: string;
+  fresh_count: number;
+  last_observed_at: string | null;
+  reason: string;
+}
+
+export interface StatusMap {
+  generated_at: string;
+  default: 'nodata';
+  cells: Record<string, CellStatus>;
+}
+
+export interface User {
+  id: number;
+  email: string;
+  display_name: string;
+  role: 'user' | 'moderator' | 'admin';
+  banned_until: string | null;
+}
+
+export interface AuthResult {
+  token: string;
+  user: User;
+}
+
+export interface PhotoInfo {
+  faces_blurred: number;
+  plates_blurred: number;
+  privacy_processed: boolean;
+  privacy_detector: 'yolo' | 'haar';
+  privacy_status: 'NO_DETECTIONS' | 'PROCESSED_REQUIRES_REVIEW';
+  looks_like_ice: boolean | null;
+  material: Partial<Record<'snow' | 'white_ice' | 'clear_ice' | 'water' | 'other', number>>;
+  texture: string | null;
+  crack_score: number | null;
+  signs: string[];
+  hazard: 'danger' | 'risk' | 'none';
+  source: string;
+  ai_checked: boolean;
+}
+
+export interface Cluster {
+  lat: number;
+  lon: number;
+  zone_id: string;
+  observation_ids: number[];
+  users: number;
+  level: 'danger' | 'risk';
+  signs: string[];
+}
+
 export interface Observation {
   id: number;
   zone_id: string;
@@ -61,6 +143,7 @@ export interface Observation {
   gps_accuracy_m: number | null;
   author: string;
   photo_url: string | null;
+  photo: PhotoInfo | null;
   ai_hazard: string;
   ai_tags: string[];
   observed_at: string;
@@ -70,6 +153,20 @@ export interface Observation {
   my_reaction: ReactionKind | null;
   mine: boolean;
   excluded: boolean;
+  moderation_status: 'ok' | 'pending' | 'hidden';
+  moderation_note: string | null;
+  reports_count: number;
+  my_report: boolean;
+}
+
+export type ReportReason = 'spam' | 'insult' | 'fake' | 'not_ice' | 'personal' | 'other';
+
+export interface QueueItem extends Observation {
+  moderation_reason: string | null;
+  author_id: number;
+  author_name: string;
+  author_banned_until: string | null;
+  reports: { reason: string; comment: string }[];
 }
 
 export interface Weather {
@@ -90,6 +187,9 @@ export interface ZoneDetail {
   bay: string;
   ban: boolean;
   ban_text: string | null;
+  place: { id: string; name: string } | null;
+  kind: GridCell['kind'];
+  river: string | null;
   center: LatLon;
   geometry: GeoPolygon;
   status: ZoneStatus;
@@ -99,6 +199,17 @@ export interface ZoneDetail {
 
 export type Alert =
   | { kind: 'ban'; zone_id: string; zone_name: string; text: string; critical: true }
+  | {
+      kind: 'cluster';
+      critical: boolean;
+      zone_id: string;
+      zone_name: string;
+      text: string;
+      lat: number;
+      lon: number;
+      level: 'danger' | 'risk';
+      observation_ids: number[];
+    }
   | {
       kind: 'ai';
       critical: false;
@@ -122,7 +233,6 @@ export interface NewObservation {
   gps_accuracy_m?: number | null;
   mocked_location?: boolean;
   anonymous: boolean;
-  author_name?: string | null;
   hide_point: boolean;
   observed_at?: string;
 }
