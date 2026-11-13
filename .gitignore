@@ -1,0 +1,21 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+backend/data/app.db
+backend/data/uploads/
+backend/tests/test.db
+.pytest_cache/
+
+# Node / Expo
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/expo-env.d.ts
+mobile/ios/
+mobile/android/
+
+# Secrets
+.env
+*.env.local
