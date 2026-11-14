@@ -105,12 +105,13 @@ export default function AddScreen() {
       const o = await api.create(body);
       if (photo) {
         try {
-          await api.uploadPhoto(o.id, photo);
+          const result = await api.uploadPhoto(o.id, photo);
         } catch (e) {
-          // the observation is already published; tell why the photo was not accepted
+
           RNAlert.alert(
             'Фото не принято',
-            (e instanceof ApiError ? e.message : 'Нет связи при отправке фото.') + ' Наблюдение опубликовано без фото.',
+            (e instanceof ApiError ? e.message : String(e)) +
+              ' Наблюдение опубликовано без фото.',
           );
         }
       }

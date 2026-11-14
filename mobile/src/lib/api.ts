@@ -14,6 +14,7 @@ import type {
   ZoneDetail,
   User,
 } from './types';
+import { File } from 'expo-file-system';
 
 // On a phone, localhost is the phone itself: set EXPO_PUBLIC_API_URL=http://<your-computer-ip>:8000
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
@@ -95,10 +96,21 @@ export const api = {
       body: JSON.stringify({ kind, lat: at?.lat, lon: at?.lon }),
     }),
   uploadPhoto: (id: number, uri: string) => {
-    const form = new FormData();
-    // React Native's FormData accepts a file descriptor object
-    form.append('file', { uri, name: 'photo.jpg', type: 'image/jpeg' } as unknown as Blob);
-    return request<Observation>(`/observations/${id}/photo`, { method: 'POST', body: form });
+    console.log('[PHOTO] URI:', uri);
+
+    try {
+      const file = new File(uri);
+      const form = new FormData();
+      form.append('file', file);
+
+      return request<Observation>(
+        `/observations/${id}/photo`,
+        {
+          method: 'POST',
+          body: form,
+        },
+      );
+    }
   },
   report: (id: number, reason: ReportReason, comment = '') =>
     request<{ ok: boolean; message: string }>(`/observations/${id}/reports`, {
