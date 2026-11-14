@@ -14,35 +14,104 @@ let memory: { cells: GridCell[]; places: Place[] } | null = null;
 let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
-async function refresh() {
+
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let retryDelay = 5000;
+const MAX_RETRY_DELAY = 60000;
+
+function notify() {
+  listeners.forEach((listener) => listener());
+}
+
+function scheduleRetry() {
+  if (retryTimer) return;
+
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    void ensure();
+  }, retryDelay);
+
+  retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
+}
+
+async function refresh(): Promise<boolean> {
   try {
     const [g, p] = await Promise.all([api.grid(), api.places()]);
-    memory = {
-      cells: g.cells.map(([id, k, b, lat, lon]) => ({ id, kind: g.kinds[k], bay: g.bays[b], lat, lon })),
-      places: p,
-    };
-    listeners.forEach((l) => l());
-    AsyncStorage.setItem(KEY, JSON.stringify(memory)).catch(() => undefined);
-  } catch {
-    // offline: keep what we have
+
+    if (
+      !Array.isArray(g.cells) ||
+      g.cells.length === 0 ||
+      !Array.isArray(g.kinds) ||
+      !Array.isArray(g.bays) ||
+      !Array.isArray(p)
+    ) {
+      throw new Error('Некорректный ответ API карты');
+    }
+
+    const cells: GridCell[] = g.cells.map(([id, k, b, lat, lon]) => {
+      const kind = g.kinds[k];
+      const bay = g.bays[b];
+
+      if (
+        typeof id !== 'string' ||
+        typeof kind !== 'string' ||
+        typeof bay !== 'string'
+      ) {
+        throw new Error('Некорректная H3-ячейка');
+      }
+
+      return { id, kind, bay, lat, lon };
+    });
+
+    memory = { cells, places: p };
+    notify();
+
+    void AsyncStorage.setItem(KEY, JSON.stringify(memory));
+
+    retryDelay = 5000;
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = null;
+
+    return true;
+  } catch (error) {
+    console.warn('[MapData] Не удалось обновить карту:', error);
+    return false;
   }
 }
 
-function ensure() {
-  if (!loading) {
-    loading = (async () => {
-      if (!memory) {
-        try {
-          const raw = await AsyncStorage.getItem(KEY);
-          if (raw) {
-            memory = JSON.parse(raw);
-            listeners.forEach((l) => l());
+function ensure(): Promise<void> {
+  if (loading) return loading;
+
+  loading = (async () => {
+    if (!memory) {
+      try {
+        const raw = await AsyncStorage.getItem(KEY);
+
+        if (raw) {
+          const cached = JSON.parse(raw);
+
+          if (
+            Array.isArray(cached.cells) &&
+            Array.isArray(cached.places)
+          ) {
+            memory = cached;
+            notify();
           }
-        } catch {}
+        }
+      } catch (error) {
+        console.warn('[MapData] Ошибка чтения кэша:', error);
       }
-      await refresh();
-    })();
-  }
+    }
+
+    const success = await refresh();
+
+    if (!success) {
+      scheduleRetry();
+    }
+  })().finally(() => {
+    loading = null;
+  });
+
   return loading;
 }
 
